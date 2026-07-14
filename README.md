@@ -89,9 +89,33 @@ diagnostics (`ICNTL(4)=2`) are enabled so per-phase factorization timing/memory
 appears in the log while it runs.
 
 ## Solver
-`solver: umfpack` (default, scipy SuperLU — robust, no MUMPS) or `solver: petsc`
-in the validation config. For the largest solves a **MUMPS-enabled PETSc**
-(`USE_MUMPS=1 ./install.sh`, then `solver: petsc`) is faster and lighter on memory.
+`solver:` in the validation config picks the direct solver used for **both** the
+reference and the pixel solve. Use `petsc` (MUMPS) for anything beyond a toy mesh:
+
+| `solver:` | backend | verdict |
+|---|---|---|
+| `umfpack` | scipy `spsolve` → SuperLU (scikits.umfpack is *not* installed, so this is SuperLU, not UMFPACK) | **aborts above ~1M DOF** — `Not enough memory to perform factorization` + core dump, already at `refinement_factor: 15` (1.9M DOF) while sitting at 8 GB RSS with 60 GB free. It is SuperLU's int32 indexing limit, *not* physical RAM: adding memory does not help. |
+| `petsc` | PETSc → MUMPS (nested dissection) | the working path. Factorises where SuperLU aborts, and is ~2–5x faster at equal size. |
+
+Measured on the f\*=2 triangular cloak (TRI6, 4 DOF/node, 32-core / 62 GB box):
+
+| refinement | nodes (cloak) | DOF | umfpack (SuperLU) | petsc (MUMPS) |
+|---|---|---|---|---|
+| 3 | 166k | 0.67M | 57 s, 9.5 GB | — |
+| 5 | 220k | 0.88M | 94 s, 12.7 GB | — |
+| 15 | 473k | 1.9M | **abort (core dump)** | 19 s, 13.4 GB |
+| 25 | 704k | 2.8M | abort | 27 s, 19.5 GB |
+| **50** | **1.21M** | **4.9M** | abort | **53 s / solve, 43 GB peak** |
+
+Full `refinement_factor: 50` run end-to-end with MUMPS: **3 min 45 s wall, 43.4 GiB
+peak RSS** — 108 s meshing, 63 s reference solve (full mesh, 5.7M DOF), 53 s pixel
+solve (cloak mesh, 4.9M DOF). It fits comfortably in 62 GB; no large-RAM machine
+needed at this refinement. Node count grows ~linearly (not quadratically) in the
+refinement factor, because the gmsh size fields are distance-graded.
+
+MUMPS ships with the conda env (`petsc 3.25` + `mumps-mpi 5.8.2`); nothing to
+rebuild. With `solver: petsc`, MUMPS diagnostics (`ICNTL(4)=2`) print per-phase
+factorization timing/memory to the log while it runs.
 
 ## Validate a different design set
 Point `cell_designs` at any directory of `cell_XXX/canvas.npy` (+ optional

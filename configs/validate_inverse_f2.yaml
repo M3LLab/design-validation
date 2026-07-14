@@ -9,6 +9,12 @@ f_star:       2.0            # normalised frequency
 void_ratio:   1.0e-6         # E_void / E_cement for the ersatz void material
 output_dir:   output_inverse
 
-# Mesh fineness (elements per micro-pixel). See README "Convergence".
-#   ~25 -> ~1 elem/pixel,  ~50 -> ~2 elems/pixel (ligament-resolved).
+# Direct solver for BOTH the reference and the pixel solve. 'umfpack' (scipy
+# SuperLU) aborts with "Not enough memory to perform factorization" above ~1M DOF
+# (int32 indexing, not physical RAM); 'petsc' = MUMPS, required at refinement 50.
+solver:       petsc
+
+# Mesh fineness. Node count grows ~linearly in this factor (distance-graded size
+# fields), not quadratically:  25 -> 0.70M nodes / 2.8M DOF;  50 -> 1.21M nodes /
+# 4.9M DOF (~1.2 elements per micro-pixel). See README "Convergence".
 refinement_factor: 50

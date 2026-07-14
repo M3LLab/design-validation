@@ -9,9 +9,18 @@ f_star:       2.0            # normalised frequency
 void_ratio:   1.0e-6         # E_void / E_cement for the ersatz void material
 output_dir:   output
 
+# Direct solver for BOTH the reference and the pixel solve.
+#   umfpack -> scipy spsolve (SuperLU). Dies with "Not enough memory to perform
+#              factorization" (int32 indexing, not real RAM) above ~1M DOF, i.e.
+#              already at refinement_factor ~15 — regardless of physical RAM.
+#   petsc   -> MUMPS via PETSc (nested dissection): the only workable option at
+#              refinement 50. ~2x faster and factorises where SuperLU aborts.
+solver:       petsc
+
 # Mesh fineness. This is the knob that decides whether the microstructure is
-# resolved. Higher = more trustworthy but far more memory (direct factorisation).
-#   ~25  ->  ~1 FEM element per micro-pixel  (order 10^5-10^6 nodes; tens of GB)
-#   ~50  ->  ~2 elements/pixel, ligament-resolved  (order 10^7 DOF; ~hundreds of GB)
+# resolved. The mesh-size fields are distance-graded, so node count grows roughly
+# LINEARLY in this factor, not quadratically (measured, TRI6, 4 DOF/node):
+#   25 -> 0.70M nodes / 2.8M DOF  (~0.6 element per micro-pixel)
+#   50 -> 1.21M nodes / 4.9M DOF  (~1.2 elements per micro-pixel; h=1.15e-3 vs pixel 1.33e-3)
 # Start low, raise it and watch u_ratio converge (see README "Convergence").
 refinement_factor: 50

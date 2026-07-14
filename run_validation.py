@@ -56,12 +56,22 @@ from rayleigh_cloak.loss import (
     transmitted_displacement_ratio,
 )
 from rayleigh_cloak.materials import C_iso
-from rayleigh_cloak.mesh import extract_submesh, generate_mesh_full
+from rayleigh_cloak.mesh import extract_submesh
 from rayleigh_cloak.optimize import get_top_surface_beyond_cloak_indices
 from rayleigh_cloak.problem import (
     RayleighCloakProblem, build_problem, _make_dirichlet_bc, _make_top_surface,
 )
-from rayleigh_cloak.solver import _create_geometry, solve_reference
+from rayleigh_cloak.solver import _create_geometry, _full_mesh, solve_reference
+
+
+def generate_mesh_full(cfg, dp, geometry):
+    """Build the full (no-cutout) mesh, dispatching on ``cfg.mesh.builder``.
+
+    Goes through ``rayleigh_cloak.solver._full_mesh`` rather than calling the
+    legacy builder directly, so ``builder: uniform_tri6`` in the config is
+    actually honoured here (it was silently ignored before).
+    """
+    return _full_mesh(cfg, dp, geometry)
 
 import logging
 logging.getLogger("jax_fem").setLevel(logging.WARNING)
@@ -342,15 +352,18 @@ def main():
     start_logging(out_dir, "run.log")
 
     base = load_config(str(fem_cfg_path))
+    builder = str(vc.get("builder", base.mesh.builder))
     cfg = base.model_copy(update={
         "domain": base.domain.model_copy(update={"f_star": f_star}),
-        "mesh": base.mesh.model_copy(update={"refinement_factor": refinement}),
+        "mesh": base.mesh.model_copy(update={"refinement_factor": refinement,
+                                             "builder": builder}),
         "output_dir": str(out_dir),
     })
     dp = DerivedParams.from_config(cfg)
     geometry = _create_geometry(cfg, dp)
     print(f"=== validation: f*={f_star}  refinement={refinement}  "
-          f"void_ratio={void_ratio}  ele={cfg.mesh.ele_type} ===")
+          f"void_ratio={void_ratio}  ele={cfg.mesh.ele_type}  "
+          f"builder={cfg.mesh.builder} ===")
 
     # tiled cement/void canvas + structure image
     print("--- tiling generated microstructures into the triangle ---")

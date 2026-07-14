@@ -1,0 +1,32 @@
+# Same pixel-level validation as validate_diffusion_f2.yaml, but on the mesh
+# builder that docs/mesh_refinement_selection.md actually recommends.
+#
+# The legacy builder grades element size by DISTANCE FROM THE CLOAK BOUNDARY
+# CURVES (Threshold field, DistMax = 2b), so `refinement_factor` only sets the
+# size AT the boundary; the cloak interior — where the cement/void pixels live —
+# stays coarse and its node density is re-weighted at every refinement. That is
+# the mechanism behind the bouncing u_ratio (see §3d "the legacy graded field
+# re-weights node density across refinements").
+#
+# `uniform_tri6` puts a single uniform h_in over the whole cloak, so
+# refinement_factor maps directly onto elements-per-pixel and a refinement sweep
+# is actually a controlled experiment.
+
+fem_config:   configs/fem_base.yaml
+params:       data/optimized_params.npz
+cell_designs: data/cell_designs_diffusion
+
+f_star:       2.0
+void_ratio:   1.0e-6
+output_dir:   output_uniform
+
+builder:      uniform_tri6   # uniform h_in inside the cloak (doc's Regime-B builder)
+solver:       petsc          # MUMPS; SuperLU aborts above ~1M DOF
+
+# Small test only. h_in = h_elem / refinement_factor = 0.0577 / rf, so
+# elements-per-pixel = pixel/h_in = rf / 43.4  (pixel = 1.330e-3).
+#   rf =  43 -> 1 e/px       rf = 130 -> 3 e/px (~42M DOF, ~300GB — infeasible here)
+# These small values are far below 1 e/px: they cannot resolve the microstructure
+# and are here to check the builder runs and to see whether the metric behaves
+# smoothly under refinement, not to produce a converged u_ratio.
+refinement_factor: 5
