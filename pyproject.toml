@@ -1,0 +1,31 @@
+[project]
+name = "cloak-design-validation"
+version = "0.1.0"
+description = "Standalone pixel-level FEM validation of microstructured Rayleigh-wave cloak designs"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+
+# NOTE: jax_fem and rayleigh_cloak are NOT listed here — they are vendored under
+# vendor/ (jax_fem is a locally modified fork) and put on sys.path by
+# run_validation.py. Only their third-party dependencies are declared below.
+dependencies = [
+    "jax>=0.4.30",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.7",
+    "meshio>=5.3",
+    "gmsh>=4.12",
+    "fenics-basix>=0.9",       # jax_fem uses basix reference elements
+    "petsc>=3.20",             # builds PETSc from source (needs C/Fortran + MPI)
+    "petsc4py>=3.20",          # imported by jax_fem; direct solve if solver=petsc
+    "h5py>=3.9",
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+    "pyfiglet>=1.0",           # jax_fem import banner
+]
+
+[tool.uv]
+# petsc4py from PyPI builds a serial PETSc without MUMPS. For the large
+# full-triangle solve, a MUMPS-enabled PETSc is strongly recommended — see
+# install.sh (USE_MUMPS=1) and the README.
+package = false

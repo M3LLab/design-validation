@@ -1,0 +1,14 @@
+# Full-triangle pixel-level validation of the INVERSE-designed (neural-field)
+# cloak @ f*=2.0. Paths are relative to the repo root (design_validation/).
+
+fem_config:   configs/fem_base.yaml          # FEM setup (geometry, PML, source, TRI6)
+params:       data/optimized_params.npz       # optimiser output (per-cell homogenised C)
+cell_designs: data/cell_designs_inverse       # neural-field cement/void cells (canvas.npy per cell)
+
+f_star:       2.0            # normalised frequency
+void_ratio:   1.0e-6         # E_void / E_cement for the ersatz void material
+output_dir:   output_inverse
+
+# Mesh fineness (elements per micro-pixel). See README "Convergence".
+#   ~25 -> ~1 elem/pixel,  ~50 -> ~2 elems/pixel (ligament-resolved).
+refinement_factor: 50
