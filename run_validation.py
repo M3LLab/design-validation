@@ -59,12 +59,58 @@ from rayleigh_cloak.materials import C_iso
 from rayleigh_cloak.mesh import extract_submesh, generate_mesh_full
 from rayleigh_cloak.optimize import get_top_surface_beyond_cloak_indices
 from rayleigh_cloak.problem import (
-    RayleighCloakProblem, _make_dirichlet_bc, _make_top_surface,
+    RayleighCloakProblem, build_problem, _make_dirichlet_bc, _make_top_surface,
 )
 from rayleigh_cloak.solver import _create_geometry, solve_reference
 
 import logging
 logging.getLogger("jax_fem").setLevel(logging.WARNING)
+
+
+class _Tee:
+    """Duplicate stdout/stderr to a line-buffered log file, timestamping each
+    line, so a long run always has a `tail -f`-able log."""
+
+    def __init__(self, path, stream):
+        self.f = open(path, "a", buffering=1)
+        self.stream = stream
+        self._bol = True
+
+    def write(self, s):
+        self.stream.write(s)
+        if self._bol and s and not s.isspace():
+            ts = time.strftime("%H:%M:%S")
+            self.f.write(f"[{ts}] ")
+        self.f.write(s)
+        self._bol = s.endswith("\n")
+
+    def flush(self):
+        self.stream.flush(); self.f.flush()
+
+
+def _make_solver_opts(vc):
+    """Solver options for the direct solves. Default 'umfpack' (scipy SuperLU,
+    no MUMPS build needed). 'petsc' uses a MUMPS-enabled PETSc (vendored jax_fem
+    routes lu -> MUMPS when available) — far less memory on large meshes."""
+    which = str(vc.get("solver", "umfpack")).lower()
+    if which == "petsc":
+        try:
+            from petsc4py import PETSc
+            PETSc.Options().setValue("mat_mumps_icntl_4", "2")   # MUMPS progress
+        except Exception:
+            pass
+        return {"petsc_solver": {"ksp_type": "preonly", "pc_type": "lu"}}
+    return {"umfpack_solver": {}}
+
+
+def start_logging(out_dir, name="run.log"):
+    """Tee stdout+stderr to ``out_dir/name`` (call after out_dir exists)."""
+    log_path = Path(out_dir) / name
+    sys.stdout = _Tee(log_path, sys.__stdout__)
+    sys.stderr = _Tee(log_path, sys.__stderr__)
+    print(f"=== logging to {log_path}  ({time.strftime('%Y-%m-%d %H:%M:%S')}) ===",
+          flush=True)
+    return log_path
 
 
 # ── cloak geometry / grid (dataset-free) ────────────────────────────
@@ -293,6 +339,7 @@ def main():
     void_ratio = float(vc.get("void_ratio", 1e-6))
     out_dir = (_HERE / vc.get("output_dir", "output")).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    start_logging(out_dir, "run.log")
 
     base = load_config(str(fem_cfg_path))
     cfg = base.model_copy(update={
@@ -317,24 +364,25 @@ def main():
     full_mesh = generate_mesh_full(cfg, dp, geometry)
     cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
     print(f"  mesh: {len(cloak_mesh.points)} nodes, {cloak_mesh.cells.shape[0]} cells")
-    ref = solve_reference(cfg, mesh=full_mesh)
 
-    # pixel-level cloak solve
-    print("--- pixel-level cloak solve (this is the memory/time bottleneck) ---")
-    which = str(vc.get("solver", "umfpack")).lower()
-    if which == "petsc":
-        # PETSc direct LU; fast only with a MUMPS-enabled PETSc (see install.sh).
-        solver_opts = {"petsc_solver": {"ksp_type": cfg.solver.ksp_type,
-                                        "pc_type": cfg.solver.pc_type}}
-    else:
-        # scipy sparse-direct (SuperLU/UMFPACK) — no MUMPS needed, robust default.
-        solver_opts = {"umfpack_solver": {}}
-    print(f"  solver: {which}")
+    # solver choice — used for BOTH the reference and the pixel solve. The
+    # config's native PETSc LU has catastrophic fill; always use umfpack
+    # (scipy SuperLU) or a MUMPS-enabled PETSc instead.
+    solver_opts = _make_solver_opts(vc)
+    print(f"  solver: {solver_opts}")
+
+    # reference (defect-free) solve — same solver, NOT the config's native LU.
+    ref_cfg = cfg.model_copy(update={"is_reference": True})
+    ref_problem = build_problem(full_mesh, ref_cfg, dp, geometry)
+    u_ref = np.asarray(jax_fem_solver(ref_problem, solver_options=solver_opts)[0])
+
+    # pixel-level cloak solve (the memory/time bottleneck)
+    print("--- pixel-level cloak solve ---")
     problem = build_pixel_problem(cloak_mesh, cfg, dp, geometry, canvas, cloak_bbox, void_ratio)
     u_val = np.asarray(jax_fem_solver(problem, solver_options=solver_opts)[0])
 
     cs_idx, rs_idx = _surface_indices(cloak_mesh, geometry, dp, kept_nodes, cfg.loss)
-    ratio = float(transmitted_displacement_ratio(u_val, ref.u, cs_idx, rs_idx))
+    ratio = float(transmitted_displacement_ratio(u_val, u_ref, cs_idx, rs_idx))
     peak = np.percentile(np.linalg.norm(u_val[:, :2], axis=1), 95)
     umax = float(np.abs(u_val[:, :2]).max())
     print(f"\n================  VALIDATION RESULT  ================")

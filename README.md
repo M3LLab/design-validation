@@ -74,6 +74,20 @@ For scale: the reference homogenised (macro) cloak ratio for these diffusion
 designs is ~0.97 @ f\*=2.0; a converged pixel solve should approach that (scale
 separation bounds the gap to a few percent).
 
+## Logs / monitoring a long run
+Both scripts tee stdout+stderr to a **timestamped, line-buffered log** in the
+output dir, so you can watch a multi-hour run live:
+```bash
+tail -f output/run.log            # run_validation.py
+tail -f output/convergence.csv    # convergence_sweep.py: one row per completed refinement
+tail -f output/sweep.log          # convergence_sweep.py full log
+```
+`convergence.csv` is written **incrementally** (after each refinement), so an OOM
+at a high refinement still leaves the completed points. The pixel factorization is
+otherwise a single opaque call — with `solver: petsc` on a MUMPS build, MUMPS
+diagnostics (`ICNTL(4)=2`) are enabled so per-phase factorization timing/memory
+appears in the log while it runs.
+
 ## Solver
 `solver: umfpack` (default, scipy SuperLU — robust, no MUMPS) or `solver: petsc`
 in the validation config. For the largest solves a **MUMPS-enabled PETSc**

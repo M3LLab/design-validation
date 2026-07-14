@@ -87,6 +87,17 @@ def petsc_solve(A, b, ksp_type, pc_type):
     if ksp_type == 'tfqmr':
         ksp.pc.setFactorSolverType('mumps')
 
+    # [design_validation patch] Route direct factorisations through MUMPS when it
+    # is available: nested-dissection ordering gives far lower fill (memory) than
+    # PETSc's native LU on the large 2-D cloak meshes. Falls back silently to the
+    # native solver if this PETSc was built without MUMPS.
+    if pc_type in ('lu', 'cholesky'):
+        try:
+            ksp.pc.setFactorSolverType('mumps')
+            ksp.pc.setUp()
+        except Exception:
+            pass
+
     logger.debug(f'PETSc Solver - Solving linear system with ksp_type = {ksp.getType()}, pc = {ksp.pc.getType()}')
     x = PETSc.Vec().createSeq(len(b))
     ksp.solve(rhs, x)

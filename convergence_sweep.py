@@ -59,9 +59,9 @@ def main() -> None:
     void_ratio = float(vc.get("void_ratio", 1e-6))
     out_dir = (here / vc.get("output_dir", "output")).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    rv.start_logging(out_dir, "sweep.log")
     which = str(vc.get("solver", "umfpack")).lower()
-    solver_opts = ({"umfpack_solver": {}} if which != "petsc" else
-                   {"petsc_solver": {"ksp_type": "preonly", "pc_type": "lu"}})
+    solver_opts = rv._make_solver_opts(vc)
 
     base = rv.load_config(str(fem_cfg_path))
 
@@ -93,12 +93,14 @@ def main() -> None:
             cloak_mesh, kept = rv.extract_submesh(full_mesh, geometry)
             nodes = len(cloak_mesh.points)
             print(f"[refinement={r:3d}] nodes={nodes} ... solving", flush=True)
-            ref = rv.solve_reference(cfg, mesh=full_mesh)
+            ref_cfg = cfg.model_copy(update={"is_reference": True})
+            ref_problem = rv.build_problem(full_mesh, ref_cfg, dp, geometry)
+            u_ref = np.asarray(rv.jax_fem_solver(ref_problem, solver_options=solver_opts)[0])
             problem = rv.build_pixel_problem(
                 cloak_mesh, cfg, dp, geometry, canvas, cloak_bbox, void_ratio)
             u = np.asarray(rv.jax_fem_solver(problem, solver_options=solver_opts)[0])
             cs, rs = rv._surface_indices(cloak_mesh, geometry, dp, kept, cfg.loss)
-            ratio = float(rv.transmitted_displacement_ratio(u, ref.u, cs, rs))
+            ratio = float(rv.transmitted_displacement_ratio(u, u_ref, cs, rs))
             p95 = np.percentile(np.linalg.norm(u[:, :2], axis=1), 95)
             spike = float(np.abs(u[:, :2]).max()) / max(p95, 1e-30)
             wall, rss = time.time() - t0, _peak_rss_gb()
