@@ -9,6 +9,24 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# ── 0. system build deps (Debian/Ubuntu) ─────────────────────────────
+# PETSc builds from source, so it needs a C/Fortran compiler and MPI.
+if command -v apt-get >/dev/null 2>&1; then
+    missing=()
+    for pkg in build-essential gfortran libopenmpi-dev; do
+        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+            missing+=("$pkg")
+        fi
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "== installing system packages: ${missing[*]} =="
+        sudo apt-get update
+        sudo apt-get install -y "${missing[@]}"
+    else
+        echo "== system build deps already present =="
+    fi
+fi
+
 # ── 1. uv ────────────────────────────────────────────────────────────
 if ! command -v uv >/dev/null 2>&1; then
     echo "== installing uv =="
