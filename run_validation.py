@@ -352,11 +352,17 @@ def main():
     start_logging(out_dir, "run.log")
 
     base = load_config(str(fem_cfg_path))
-    builder = str(vc.get("builder", base.mesh.builder))
+    mesh_update = {"refinement_factor": refinement,
+                   "builder": str(vc.get("builder", base.mesh.builder))}
+    # Optional: let the validation config pin the far-field / surface refinement
+    # so they don't scale with refinement_factor (the uniform_cloak builder wants
+    # to refine the cloak interior only). Absent -> the FEM config's values stand.
+    for k in ("refinement_factor_surface", "refinement_factor_outside"):
+        if vc.get(k) is not None:
+            mesh_update[k] = float(vc[k])
     cfg = base.model_copy(update={
         "domain": base.domain.model_copy(update={"f_star": f_star}),
-        "mesh": base.mesh.model_copy(update={"refinement_factor": refinement,
-                                             "builder": builder}),
+        "mesh": base.mesh.model_copy(update=mesh_update),
         "output_dir": str(out_dir),
     })
     dp = DerivedParams.from_config(cfg)

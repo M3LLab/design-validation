@@ -166,10 +166,13 @@ def main() -> None:
 
     rows = []
     for r in refinements:
+        mesh_update = {"refinement_factor": r, "builder": builder}
+        for k in ("refinement_factor_surface", "refinement_factor_outside"):
+            if vc.get(k) is not None:
+                mesh_update[k] = float(vc[k])
         cfg = base.model_copy(update={
             "domain": base.domain.model_copy(update={"f_star": f_star}),
-            "mesh": base.mesh.model_copy(update={"refinement_factor": r,
-                                                 "builder": builder}),
+            "mesh": base.mesh.model_copy(update=mesh_update),
             "output_dir": str(out_dir),
         })
         dp = rv.DerivedParams.from_config(cfg)

@@ -29,7 +29,11 @@
 set -u
 cd "$(dirname "$0")" || exit 1
 
-CONFIG=${CONFIG:-configs/validate_diffusion_f2.yaml}
+# Default: the uniform_cloak builder, which refines the cloak interior uniformly
+# and leaves the mesh outside the cloak alone (see the config header). This is the
+# builder for which refinement_factor maps directly onto elements-per-pixel, so a
+# refinement sweep is a controlled experiment. Override CONFIG for the others.
+CONFIG=${CONFIG:-configs/validate_diffusion_f2_cloak.yaml}
 START=${START:-130}
 STEP=${STEP:-10}
 MAX=${MAX:-2000}

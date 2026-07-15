@@ -1,0 +1,48 @@
+# Pixel-level validation on the `uniform_cloak` builder — the refinement goes
+# INSIDE the cloak (uniformly, everywhere in the annulus) and the mesh outside the
+# cloak is left as it is.
+#
+# Why this config exists
+# ----------------------
+# The microstructure lives only inside the cloak, so that is the only place whose
+# element size has to beat the micro-pixel (1.330e-3). The other builders spend
+# the refinement elsewhere:
+#   legacy       - grades size by distance from the cloak BOUNDARY, so the cloak
+#                  interior stays coarse (at rf=50: median h = 2.0e-3 > pixel) and
+#                  most elements land in the surface band, not the cloak.
+#   uniform_tri6 - uniform over the cloak BOUNDING BOX, which is ~3x the annulus
+#                  area; two thirds of the elements sit in the notch and the bbox
+#                  corners, where there is no microstructure.
+#   uniform_cloak- uniform over the ANNULUS itself.  <- this file
+#
+# With this builder the resolution knob is honest:
+#   h_in = h_elem / refinement_factor = 0.05766 / rf
+#   elements-per-pixel = 1.330e-3 / h_in = rf / 43.4
+# so  rf =  44 -> 1 e/px,  rf =  87 -> 2 e/px,  rf = 130 -> 3 e/px, EVERYWHERE in
+# the cloak (not just at its boundary). Check the e_per_px column of
+# convergence.csv — it is measured from the mesh, not assumed.
+
+fem_config:   configs/fem_base.yaml
+params:       data/optimized_params.npz
+cell_designs: data/cell_designs_diffusion
+
+f_star:       2.0
+void_ratio:   1.0e-6
+output_dir:   output_cloak
+
+builder:      uniform_cloak
+solver:       petsc          # MUMPS. SuperLU aborts above ~1M DOF regardless of RAM.
+
+refinement_factor: 130       # = 3 e/px inside the cloak
+
+# Keep the mesh OUTSIDE the cloak from scaling with refinement_factor. Without
+# these two lines the free-surface band inherits refinement_factor (the
+# refinement_factor_surface -> refinement_factor fallback), so cranking the cloak
+# to 3 e/px would also refine the whole surface strip to h=4e-4 for no reason —
+# the Rayleigh wave only needs ppw 5-6. Fixing them decouples "resolve the
+# microstructure" (refinement_factor, cloak only) from "resolve the wave" (these,
+# fixed). Measured: ~30% fewer nodes at rf=44, and the saving grows with rf.
+#   h_surf = h_elem / refinement_factor_surface = 0.05766 / 6 = 9.6e-3  (ppw ~52)
+#   h_out  = h_elem / refinement_factor_outside = 0.05766 / 1 = 5.8e-2  (ppw ~8.7)
+refinement_factor_surface: 6
+refinement_factor_outside: 1.0

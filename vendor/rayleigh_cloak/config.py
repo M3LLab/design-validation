@@ -91,7 +91,7 @@ class MeshConfig(BaseModel):
     # macro cell) instead of a graded field, intended together with
     # ``ele_type: TRI6`` (quadratic) for low-dispersion macro solves. The
     # builder honours ``ele_type`` for both TRI3 and TRI6.
-    builder: Literal["legacy", "uniform_tri6"] = "legacy"
+    builder: Literal["legacy", "uniform_tri6", "uniform_cloak"] = "legacy"
 
 
 class SourceConfig(BaseModel):
