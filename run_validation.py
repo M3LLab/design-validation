@@ -56,7 +56,7 @@ from rayleigh_cloak.loss import (
     transmitted_displacement_ratio,
 )
 from rayleigh_cloak.materials import C_iso
-from rayleigh_cloak.mesh import extract_submesh
+from rayleigh_cloak.mesh import extract_submesh, extract_solid_submesh
 from rayleigh_cloak.optimize import get_top_surface_beyond_cloak_indices
 from rayleigh_cloak.problem import (
     RayleighCloakProblem, build_problem, _make_dirichlet_bc, _make_top_surface,
@@ -257,6 +257,19 @@ class PixelMaterialProblem(RayleighCloakProblem):
         pass
 
 
+def build_solid_problem(mesh, cfg, dp, geometry):
+    """Uniform-cement problem on the solid-only (voids-removed) cloak mesh.
+
+    With ``mesh_voids: remove`` the pores are genuine holes in ``mesh``
+    (traction-free), so the meshed material is just homogeneous cement + PML —
+    identical to the reference material map. We therefore reuse ``build_problem``
+    with ``is_reference=True`` (uniform C0, rho0), which keeps the source, BCs and
+    PML profile unchanged. The cloak's effective anisotropy now *emerges* from the
+    perforation geometry rather than from a prescribed C(x)."""
+    solid_cfg = cfg.model_copy(update={"is_reference": True})
+    return build_problem(mesh, solid_cfg, dp, geometry)
+
+
 def build_pixel_problem(mesh, cfg, dp, geometry, canvas, cloak_bbox, void_ratio):
     C0 = C_iso(dp.lam, dp.mu)
     C_void = C_iso(dp.lam * void_ratio, dp.mu * void_ratio)
@@ -347,6 +360,15 @@ def main():
     f_star = float(vc.get("f_star", 2.0))
     refinement = int(args.refinement_factor or vc.get("refinement_factor", 25))
     void_ratio = float(vc.get("void_ratio", 1e-6))
+    # How the microstructure pores are modelled:
+    #   "remove" (default) — the physically correct model: cut the void pixels out
+    #            of the mesh, leaving traction-free holes and meshing only the solid
+    #            cement (standard for perforated / auxetic microstructures).
+    #   "weak"   — legacy ersatz fill: mesh the pores with soft material scaled by
+    #            void_ratio (kept for A/B comparison; see extract_solid_submesh).
+    mesh_voids = str(vc.get("mesh_voids", "remove")).lower()
+    if mesh_voids not in ("remove", "weak"):
+        raise ValueError(f"mesh_voids must be 'remove' or 'weak', got {mesh_voids!r}")
     out_dir = (_HERE / vc.get("output_dir", "output")).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     start_logging(out_dir, "run.log")
@@ -367,8 +389,9 @@ def main():
     })
     dp = DerivedParams.from_config(cfg)
     geometry = _create_geometry(cfg, dp)
+    void_desc = "holes (traction-free)" if mesh_voids == "remove" else f"weak x{void_ratio:g}"
     print(f"=== validation: f*={f_star}  refinement={refinement}  "
-          f"void_ratio={void_ratio}  ele={cfg.mesh.ele_type}  "
+          f"voids={mesh_voids} [{void_desc}]  ele={cfg.mesh.ele_type}  "
           f"builder={cfg.mesh.builder} ===")
 
     # tiled cement/void canvas + structure image
@@ -381,8 +404,17 @@ def main():
     print("--- meshing + reference (defect-free) solve ---")
     t0 = time.time()
     full_mesh = generate_mesh_full(cfg, dp, geometry)
-    cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
-    print(f"  mesh: {len(cloak_mesh.points)} nodes, {cloak_mesh.cells.shape[0]} cells")
+    n_full = full_mesh.cells.shape[0]
+    if mesh_voids == "remove":
+        # Mesh only the solid cement: cut defect + void pores out (traction-free).
+        cloak_mesh, kept_nodes = extract_solid_submesh(
+            full_mesh, geometry, canvas, cloak_bbox)
+    else:
+        # Legacy: keep the pores, fill them with weak material later.
+        cloak_mesh, kept_nodes = extract_submesh(full_mesh, geometry)
+    dropped = n_full - cloak_mesh.cells.shape[0]
+    print(f"  mesh: {len(cloak_mesh.points)} nodes, {cloak_mesh.cells.shape[0]} cells "
+          f"({dropped} of {n_full} elements removed, {100*dropped/max(n_full,1):.1f}%)")
 
     # solver choice — used for BOTH the reference and the pixel solve. The
     # config's native PETSc LU has catastrophic fill; always use umfpack
@@ -395,9 +427,13 @@ def main():
     ref_problem = build_problem(full_mesh, ref_cfg, dp, geometry)
     u_ref = np.asarray(jax_fem_solver(ref_problem, solver_options=solver_opts)[0])
 
-    # pixel-level cloak solve (the memory/time bottleneck)
-    print("--- pixel-level cloak solve ---")
-    problem = build_pixel_problem(cloak_mesh, cfg, dp, geometry, canvas, cloak_bbox, void_ratio)
+    # cloak solve (the memory/time bottleneck)
+    if mesh_voids == "remove":
+        print("--- solid-only cloak solve (pores meshed as traction-free holes) ---")
+        problem = build_solid_problem(cloak_mesh, cfg, dp, geometry)
+    else:
+        print("--- pixel-level cloak solve (weak-material pores) ---")
+        problem = build_pixel_problem(cloak_mesh, cfg, dp, geometry, canvas, cloak_bbox, void_ratio)
     u_val = np.asarray(jax_fem_solver(problem, solver_options=solver_opts)[0])
 
     cs_idx, rs_idx = _surface_indices(cloak_mesh, geometry, dp, kept_nodes, cfg.loss)
@@ -406,14 +442,16 @@ def main():
     umax = float(np.abs(u_val[:, :2]).max())
     print(f"\n================  VALIDATION RESULT  ================")
     print(f"  f* = {f_star}   refinement = {refinement}   nodes = {len(cloak_mesh.points)}")
-    print(f"  pixel-level u_ratio = {ratio:.4f}   (1.0 = perfect cloak)")
+    print(f"  voids = {mesh_voids} [{void_desc}]")
+    print(f"  u_ratio = {ratio:.4f}   (1.0 = perfect cloak)")
     print(f"  max|u|/p95 = {umax/max(peak,1e-30):.2f}  (large + growing with refinement => non-PD / aliasing)")
     print(f"  wall = {time.time()-t0:.1f}s")
     print(f"====================================================\n")
 
     with open(out_dir / "validation_result.csv", "w") as f:
-        f.write("f_star,refinement,nodes,u_ratio,maxu_over_p95\n")
-        f.write(f"{f_star},{refinement},{len(cloak_mesh.points)},{ratio:.6f},{umax/max(peak,1e-30):.4f}\n")
+        f.write("f_star,refinement,nodes,mesh_voids,u_ratio,maxu_over_p95\n")
+        f.write(f"{f_star},{refinement},{len(cloak_mesh.points)},{mesh_voids},"
+                f"{ratio:.6f},{umax/max(peak,1e-30):.4f}\n")
     print(f"  result CSV -> {out_dir/'validation_result.csv'}")
 
 

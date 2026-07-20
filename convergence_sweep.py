@@ -132,6 +132,9 @@ def main() -> None:
     cell_designs = (here / vc["cell_designs"]).resolve()
     f_star = float(vc.get("f_star", 2.0))
     void_ratio = float(vc.get("void_ratio", 1e-6))
+    mesh_voids = str(vc.get("mesh_voids", "remove")).lower()
+    if mesh_voids not in ("remove", "weak"):
+        raise ValueError(f"mesh_voids must be 'remove' or 'weak', got {mesh_voids!r}")
     out_dir = (here / vc.get("output_dir", "output")).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     rv.start_logging(out_dir, "sweep.log")
@@ -146,7 +149,8 @@ def main() -> None:
         "domain": base.domain.model_copy(update={"f_star": f_star})})
     dp0 = rv.DerivedParams.from_config(cfg0)
     print(f"=== convergence sweep: f*={f_star} refinements={refinements} "
-          f"solver={which} builder={builder} ele={base.mesh.ele_type} ===")
+          f"solver={which} builder={builder} ele={base.mesh.ele_type} "
+          f"voids={mesh_voids} ===")
     canvas, (n_x, n_y), (H, W), cloak_bbox, _mC, _mrho = rv.build_canvas(
         params, cell_designs, cfg0, dp0)
 
@@ -180,7 +184,11 @@ def main() -> None:
         t0 = time.time()
         try:
             full_mesh = rv.generate_mesh_full(cfg, dp, geometry)
-            cloak_mesh, kept = rv.extract_submesh(full_mesh, geometry)
+            if mesh_voids == "remove":
+                cloak_mesh, kept = rv.extract_solid_submesh(
+                    full_mesh, geometry, canvas, cloak_bbox)
+            else:
+                cloak_mesh, kept = rv.extract_submesh(full_mesh, geometry)
             nodes = len(cloak_mesh.points)
             dof = 4 * nodes
             h_med, e_px = _cloak_resolution(cloak_mesh, cfg, dp)
@@ -191,8 +199,11 @@ def main() -> None:
             ref_cfg = cfg.model_copy(update={"is_reference": True})
             ref_problem = rv.build_problem(full_mesh, ref_cfg, dp, geometry)
             u_ref = np.asarray(rv.jax_fem_solver(ref_problem, solver_options=solver_opts)[0])
-            problem = rv.build_pixel_problem(
-                cloak_mesh, cfg, dp, geometry, canvas, cloak_bbox, void_ratio)
+            if mesh_voids == "remove":
+                problem = rv.build_solid_problem(cloak_mesh, cfg, dp, geometry)
+            else:
+                problem = rv.build_pixel_problem(
+                    cloak_mesh, cfg, dp, geometry, canvas, cloak_bbox, void_ratio)
             u = np.asarray(rv.jax_fem_solver(problem, solver_options=solver_opts)[0])
             cs, rs = rv._surface_indices(cloak_mesh, geometry, dp, kept, cfg.loss)
             ratio = float(rv.transmitted_displacement_ratio(u, u_ref, cs, rs))

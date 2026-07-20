@@ -6,8 +6,18 @@ params:       data/optimized_params.npz       # optimiser output (per-cell homog
 cell_designs: data/cell_designs_diffusion     # generated cement/void cells (canvas.npy per cell)
 
 f_star:       2.0            # normalised frequency
-void_ratio:   1.0e-6         # E_void / E_cement for the ersatz void material
 output_dir:   output
+
+# How the microstructure pores are modelled:
+#   remove (default, physically correct) — cut the void pixels out of the mesh so
+#          the pores are genuine traction-free holes; only the solid cement is
+#          discretised (standard FEM practice for perforated / auxetic media).
+#          Halves the DOF in the cloak and removes the spurious weak-material
+#          modes that blow up max|u|/p95.
+#   weak  — legacy ersatz fill: mesh the pores with soft material E_void/E_cement
+#          = void_ratio. Kept only for A/B comparison against the old results.
+mesh_voids:   remove
+void_ratio:   1.0e-6         # only used when mesh_voids: weak
 
 # Direct solver for BOTH the reference and the pixel solve.
 #   umfpack -> scipy spsolve (SuperLU). Dies with "Not enough memory to perform
