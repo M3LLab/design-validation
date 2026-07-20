@@ -1,0 +1,13 @@
+# Keep the build context small and the image reproducible: ship code + data +
+# configs, not generated artifacts or local envs.
+.git
+.venv
+**/__pycache__
+*.pyc
+output
+output_cloak
+output_uniform
+*.log
+*.msh
+*.png
+.pytest_cache
